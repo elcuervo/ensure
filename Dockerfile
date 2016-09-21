@@ -2,7 +2,7 @@ FROM alpine:3.4
 MAINTAINER elcuervo <elcuervo@elcuervo.net>
 
 ENV GOSU_VERSION 1.9
-ENV ENSURE_VERSION 0.1
+ENV ENSURE_VERSION v0.1
 RUN set -x \
       && apk add --no-cache --virtual .gosu-deps dpkg gnupg openssl \
       && dpkgArch="$(dpkg --print-architecture | awk -F- '{ print $NF }')" \
