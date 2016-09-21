@@ -16,7 +16,7 @@ dist:
 	@./dist.sh
 
 container:
-	docker build -f Dockerfile -t elcuervo/ensure .
+	docker build -f Dockerfile --no-cache -t elcuervo/ensure .
 
 release:
 	docker push elcuervo/ensure
