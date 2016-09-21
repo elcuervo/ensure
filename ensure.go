@@ -34,10 +34,43 @@ var replicas = flag.Uint64("replicas", 1, "Docker Service name")
 var portFlag multipleValues
 var envFlag multipleValues
 
+func sliceToPortConfig(portSlice []string) []swarm.PortConfig {
+	portsConfig := []swarm.PortConfig{}
+
+	for _, port := range portSlice {
+		parts := strings.FieldsFunc(port, func(c rune) bool {
+			// 58 == : || 47 == /
+			return c == 58 || c == 47
+		})
+
+		if len(parts) == 0 {
+			break
+		}
+
+		pub, _ := strconv.ParseUint(parts[0], 10, 32)
+		target, _ := strconv.ParseUint(parts[1], 10, 32)
+		proto := swarm.PortConfigProtocolTCP
+
+		if len(parts) == 3 {
+			proto = swarm.PortConfigProtocol(parts[2])
+		}
+
+		portConfig := swarm.PortConfig{
+			Protocol:      proto,
+			TargetPort:    uint32(target),
+			PublishedPort: uint32(pub),
+		}
+
+		portsConfig = append(portsConfig, portConfig)
+	}
+
+	return portsConfig
+}
+
 func init() {
 	log.SetLevel(log.DebugLevel)
 
-	flag.Var(&portFlag, "port", "Ports to bind the service")
+	flag.Var(&portFlag, "publish", "Ports to bind the service")
 	flag.Var(&envFlag, "env", "Env to bind the service")
 }
 
@@ -75,40 +108,9 @@ func main() {
 
 	if err != nil {
 		log.Info("Service " + *name + " does not exist, creating.")
-		containerSpec := swarm.ContainerSpec{
-			Image: *image,
-			Env:   envFlag,
-		}
 
-		portsConfig := []swarm.PortConfig{}
-
-		for _, port := range portFlag {
-			parts := strings.FieldsFunc(port, func(c rune) bool {
-				// 58 == : || 47 == /
-				return c == 58 || c == 47
-			})
-
-			if len(parts) == 0 {
-				return
-			}
-
-			pub, _ := strconv.ParseUint(parts[0], 10, 32)
-			target, _ := strconv.ParseUint(parts[1], 10, 32)
-			proto := swarm.PortConfigProtocolTCP
-
-			if len(parts) == 3 {
-				proto = swarm.PortConfigProtocolUDP
-			}
-
-			portConfig := swarm.PortConfig{
-				Protocol:      proto,
-				TargetPort:    uint32(target),
-				PublishedPort: uint32(pub),
-			}
-			portsConfig = append(portsConfig, portConfig)
-
-		}
-
+		containerSpec := swarm.ContainerSpec{Image: *image, Env: envFlag}
+		portsConfig := sliceToPortConfig(portFlag)
 		endpointSpec := &swarm.EndpointSpec{Ports: portsConfig}
 		taskSpec := swarm.TaskSpec{ContainerSpec: containerSpec}
 		replicatedService := &swarm.ReplicatedService{Replicas: replicas}
@@ -126,28 +128,17 @@ func main() {
 		cli.ServiceCreate(context.Background(), spec, types.ServiceCreateOptions{})
 	} else {
 		log.Info("Service " + *name + " exists, checking for differences")
-		log.Printf("%+v\n", service)
 
-		spec := service.Spec
-		serviceImage := spec.TaskTemplate.ContainerSpec.Image
-		serviceReplicas := spec.Mode.Replicated.Replicas
-
-		if serviceImage != *image {
-			log.Debug("Service Image does not match")
-		} else {
-			log.Debug("Service Image matches, not updating")
+		service.Spec.TaskTemplate.ContainerSpec.Image = *image
+		service.Spec.Mode.Replicated.Replicas = replicas
+		service.Spec.TaskTemplate.ContainerSpec.Env = envFlag
+		service.Spec.EndpointSpec = &swarm.EndpointSpec{
+			Ports: sliceToPortConfig(portFlag),
 		}
 
-		if int(*serviceReplicas) != int(*replicas) {
-			log.Debug("Service Replicas does not match.")
-		} else {
-			log.Debug("Service Replicas matches, not updating")
-		}
+		cli.ServiceUpdate(context.Background(), service.ID, service.Version, service.Spec, types.ServiceUpdateOptions{})
 
-		for _, port := range portFlag {
-			log.Info(port)
-		}
-
+		log.Info("Service " + *name + " ensured!")
 	}
 
 }
